@@ -1,0 +1,26 @@
+{
+  "name": "Pocket Sommelier",
+  "short_name": "Sommelier",
+  "description": "Expert wine picks from any restaurant menu",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#0c0a09",
+  "theme_color": "#7f1d1d",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["food", "lifestyle"],
+  "lang": "en-GB"
+}

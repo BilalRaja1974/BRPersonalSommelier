@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pocket Sommelier</title>
+
+    <!-- ── PWA: Manifest & Icons ── -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#7f1d1d">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Sommelier">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="description" content="Expert wine picks from any restaurant menu">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Montserrat:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ── Base ── */
+        * { box-sizing: border-box; }
+        body {
+            background: radial-gradient(ellipse at top, #1a0505 0%, #0c0a09 60%, #080605 100%);
+            min-height: 100vh;
+            color: white;
+            font-family: 'Montserrat', sans-serif;
+            overflow-x: hidden;
+        }
+
+        /* ── Grain overlay ── */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.4;
+        }
+
+        #app { position: relative; z-index: 1; }
+
+        /* ── Typography ── */
+        .font-display { font-family: 'Cormorant Garamond', serif; }
+
+        /* ── Buttons ── */
+        .option-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .option-btn:hover { background: rgba(180, 30, 30, 0.2); border-color: rgba(180, 30, 30, 0.4); }
+        .option-btn:active { transform: scale(0.97); background: #7f1d1d; }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #9b1c1c, #7f1d1d);
+            border: 1px solid rgba(255,100,100,0.2);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .btn-primary:hover { background: linear-gradient(135deg, #b91c1c, #991b1b); transform: translateY(-1px); box-shadow: 0 8px 25px rgba(180,30,30,0.3); }
+        .btn-primary:active { transform: scale(0.98); }
+
+        .btn-upload {
+            background: white;
+            color: #1a0505;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .btn-upload:hover { background: #f5f5f4; transform: translateY(-1px); box-shadow: 0 8px 30px rgba(255,255,255,0.15); }
+
+        /* ── Cards ── */
+        .wine-card {
+            background: linear-gradient(135deg, rgba(30,20,20,0.9), rgba(20,15,15,0.95));
+            border: 1px solid rgba(255,255,255,0.08);
+            transition: all 0.25s ease;
+        }
+        .wine-card:hover { border-color: rgba(180,30,30,0.3); transform: translateY(-2px); box-shadow: 0 12px 30px rgba(0,0,0,0.4); }
+
+        /* ── Taste buttons ── */
+        .taste-btn {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .taste-btn.selected { background: rgba(127,29,29,0.5); border-color: rgba(220,60,60,0.5); color: #fca5a5; }
+        .taste-btn:hover:not(.selected) { border-color: rgba(255,255,255,0.25); }
+
+        /* ── Animations ── */
+        .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .slide-up { animation: slideUp 0.5s ease-out forwards; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        .stagger > * { opacity: 0; animation: slideUp 0.4s ease-out forwards; }
+        .stagger > *:nth-child(1) { animation-delay: 0.1s; }
+        .stagger > *:nth-child(2) { animation-delay: 0.2s; }
+        .stagger > *:nth-child(3) { animation-delay: 0.3s; }
+        .stagger > *:nth-child(4) { animation-delay: 0.4s; }
+
+        /* ── Divider ── */
+        .ornament {
+            display: flex; align-items: center; gap: 12px;
+            color: rgba(180,30,30,0.5); font-size: 10px; letter-spacing: 3px;
+        }
+        .ornament::before, .ornament::after { content: ''; flex: 1; height: 1px; background: rgba(180,30,30,0.2); }
+
+        /* ── Spinner ── */
+        .spinner {
+            width: 44px; height: 44px;
+            border: 2px solid rgba(180,30,30,0.2);
+            border-top-color: #dc2626;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Progress dots ── */
+        .progress-dot { width: 6px; height: 6px; border-radius: 50%; transition: all 0.3s ease; }
+
+        /* ── AI thinking ── */
+        .thinking-dot { animation: blink 1.2s ease-in-out infinite; }
+        .thinking-dot:nth-child(2) { animation-delay: 0.2s; }
+        .thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink { 0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(180,30,30,0.3); border-radius: 2px; }
+    </style>
+</head>
+<body>
+    <div id="app" class="max-w-md mx-auto p-6 pb-16"></div>
+
+    <script>
+        // ── PDF.js worker (FIX #3: was missing) ──
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        const app = document.getElementById('app');
+        let state = {
+            step: 'START',
+            menuWines: [],
+            restaurant: { name: '', url: '', found: false },
+            choices: { type: '', countries: [], regions: [], grapes: [], budget: '', budgetMin: undefined, budgetMax: undefined, tastes: [] },
+            recommendations: null,
+            error: null
+        };
+
+        // ── Backend URL — empty string means same domain (correct for Vercel) ──
+        const BACKEND_URL = '';
+
+        async function apiCall(messages, maxTokens = 500) {
+            const resp = await fetch(`${BACKEND_URL}/api/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages, max_tokens: maxTokens })
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error || 'Server error');
+            }
+            const data = await resp.json();
+            return data.content?.find(b => b.type === 'text')?.text || '';
+        }
+
+        // ── Progress indicator ──
+        function progressBar(currentStep) {
+            const steps = ['TYPE', 'COUNTRY', 'REGION', 'GRAPE', 'BUDGET', 'TASTE', 'RESULTS'];
+            const idx = steps.indexOf(currentStep);
+            if (idx < 0) return '';
+            return `<div class="flex justify-center gap-2 mb-8">
+                ${steps.map((s, i) => `<div class="progress-dot ${i <= idx ? 'bg-red-700' : 'bg-stone-700'}"></div>`).join('')}
+            </div>`;
+        }
+
+        // ── Main render ──
+        function render() {
+            app.innerHTML = '';
+            if (state.step === 'START')           renderStart();
+            else if (state.step === 'RESTAURANT') renderRestaurant();
+            else if (state.step === 'SEARCHING')  renderSearching();
+            else if (state.step === 'SCANNING')   renderScanning();
+            else if (state.step === 'TYPE')       renderQuiz("1. What are we drinking?", ['🍷 Red', '🥂 White', '✨ Sparkling', '🌸 Rosé'], 'type', 'COUNTRY');
+            else if (state.step === 'COUNTRY')    renderCountry();
+            else if (state.step === 'REGION')     renderRegion();
+            else if (state.step === 'GRAPE')      renderGrape();
+            else if (state.step === 'BUDGET')     renderBudgetMode();
+            else if (state.step === 'BUDGET_RANGE') renderBudgetRange();
+            else if (state.step === 'TASTE')      renderTaste();
+            else if (state.step === 'THINKING')   renderThinking();
+            else if (state.step === 'RESULTS')    renderResults();
+        }
+
+        function renderStart() {
+            app.innerHTML = `
+                <div class="mt-16 text-center fade-in">
+                    <div class="ornament mb-8">EST. THIS EVENING</div>
+                    <h1 class="font-display text-5xl text-red-600 mb-2 leading-none">Pocket<br>Sommelier</h1>
+                    <p class="text-stone-500 mb-12 text-xs tracking-widest uppercase">Expert picks from any wine list</p>
+
+                    <button onclick="state.step='RESTAURANT'; render()" class="btn-primary w-full p-5 rounded-2xl font-semibold mb-4 text-sm tracking-wide shadow-2xl flex items-center justify-center gap-3">
+                        <span class="text-xl">🍽️</span> Find a Restaurant's Wine List
+                    </button>
+
+                    <div class="ornament my-5 text-[10px]">OR</div>
+
+                    <button onclick="document.getElementById('cam').click()" class="btn-upload w-full p-5 rounded-2xl font-semibold mb-2 text-sm tracking-wide shadow-2xl flex items-center justify-center gap-3">
+                        <span class="text-xl">📸</span> Upload Menu (PDF or Photos)
+                    </button>
+                    <p class="text-stone-600 text-[10px] mb-4 tracking-wide">Multi-page PDFs and multiple photos supported</p>
+                    <input type="file" id="cam" accept="image/*,application/pdf" class="hidden" multiple onchange="handleFile(event)">
+
+                    <p class="text-stone-700 text-[10px] mt-10 tracking-wide">Powered by Claude AI · Your personal sommelier</p>
+                </div>`;
+        }
+
+        function renderRestaurant() {
+            app.innerHTML = `
+                <div class="mt-12 fade-in">
+                    <button onclick="state.step='START'; render()" class="text-stone-600 text-xs mb-8 flex items-center gap-2 hover:text-stone-400 transition-colors">
+                        ← Back
+                    </button>
+                    <div class="ornament mb-6">RESTAURANT LOOKUP</div>
+                    <h2 class="font-display text-4xl mb-3 leading-tight">Where are you dining?</h2>
+                    <p class="text-stone-500 text-xs mb-8 leading-relaxed">
+                        Enter the restaurant name and we'll try to find their wine list online automatically.
+                    </p>
+                    <input id="restaurant-input" type="text" 
+                        placeholder="e.g. The Ledbury, London"
+                        class="w-full p-4 rounded-2xl text-white text-sm outline-none mb-2"
+                        style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);"
+                        onkeydown="if(event.key==='Enter') lookupRestaurant()">
+                    <p class="text-stone-700 text-[10px] mb-6 tracking-wide">Include city for best results</p>
+                    <button onclick="lookupRestaurant()" class="btn-primary w-full p-4 rounded-2xl font-semibold text-sm tracking-widest uppercase mb-6">
+                        Search for Wine List →
+                    </button>
+                    <div class="ornament my-4 text-[10px]">HAVE THE MENU?</div>
+                    <button onclick="document.getElementById('cam2').click()" class="option-btn w-full p-4 rounded-2xl text-sm text-stone-400 mb-2">
+                        📸 Upload menu instead
+                    </button>
+                    <input type="file" id="cam2" accept="image/*,application/pdf" class="hidden" multiple onchange="handleFile(event)">
+                </div>`;
+            setTimeout(() => document.getElementById('restaurant-input')?.focus(), 100);
+        }
+
+        function renderSearching() {
+            app.innerHTML = `
+                <div class="mt-24 text-center fade-in">
+                    <div class="mb-6 flex justify-center gap-2">
+                        <div class="thinking-dot w-3 h-3 rounded-full bg-red-700"></div>
+                        <div class="thinking-dot w-3 h-3 rounded-full bg-red-700"></div>
+                        <div class="thinking-dot w-3 h-3 rounded-full bg-red-700"></div>
+                    </div>
+                    <h2 id="search-message" class="font-display text-2xl mb-2">Searching for wine list…</h2>
+                    <p id="search-sub" class="text-stone-500 text-xs">${state.restaurant.name}</p>
+                </div>`;
+        }
+
+        function updateSearchMessage(msg, sub) {
+            const m = document.getElementById('search-message');
+            const s = document.getElementById('search-sub');
+            if (m) m.textContent = msg;
+            if (s) s.textContent = sub;
+        }
+
+        // ── Restaurant lookup ──
+        // Uses a single Claude call with a detailed prompt.
+        // Claude uses its training knowledge to return the direct wine list URL.
+        // If the proxy works, we pass real page links to Claude as additional context.
+        async function lookupRestaurant() {
+            const input = document.getElementById('restaurant-input');
+            const name = input?.value?.trim();
+            if (!name) {
+                input?.focus();
+                input?.style.setProperty('border-color', 'rgba(220,60,60,0.6)');
+                return;
+            }
+            state.restaurant.name = name;
+            state.step = 'SEARCHING';
+            render();
+
+            try {
+                updateSearchMessage('Searching for wine list…', name);
+
+                // Try to fetch the restaurant homepage via proxy — use as bonus context if it works
+                const slug = name.toLowerCase().replace(/,.*$/, '').replace(/[^a-z0-9]/g, '');
+                const guessedDomain = `https://www.${slug}.com`;
+                let bonusLinks = '';
+                try {
+                    const proxies = [
+                        `https://api.allorigins.win/raw?url=${encodeURIComponent(guessedDomain)}`,
+                        `https://corsproxy.io/?${encodeURIComponent(guessedDomain)}`
+                    ];
+                    for (const proxy of proxies) {
+                        try {
+                            const r = await fetch(proxy, { signal: AbortSignal.timeout(5000) });
+                            if (r.ok) {
+                                const html = await r.text();
+                                const matches = [...html.matchAll(/href=["']([^"'#\s]{5,200})["']/gi)];
+                                const links = [...new Set(matches.map(m => {
+                                    try { return new URL(m[1], guessedDomain).href; } catch { return null; }
+                                }).filter(Boolean))].slice(0, 50);
+                                if (links.length > 3) {
+                                    bonusLinks = `\n\nLinks found on their website:\n${links.join('\n')}`;
+                                    break;
+                                }
+                            }
+                        } catch { /* try next proxy */ }
+                    }
+                } catch { /* proxy entirely unavailable */ }
+
+                updateSearchMessage('Identifying wine list…', name);
+
+                const prompt = `You are helping a restaurant diner find the wine list for "${name}".
+
+Your task: Return the direct URL to their wine list (PDF or webpage).
+
+Use your training knowledge about this restaurant. Key facts you may know:
+- The Ledbury (London): https://www.theledbury.com/pdf/The-Ledbury-Wine-List.pdf
+- Dorian (London, Notting Hill, dorianrestaurant.com): wine list is a PDF linked from their homepage
+- For any restaurant you know, return the exact wine list URL
+
+For "${name}":
+1. If you know their wine list URL with high confidence → return it
+2. If you know their website but not the exact wine list URL → return the most likely wine/drinks/menu page
+3. If you have no reliable knowledge → return found: false${bonusLinks}
+
+Respond ONLY with valid JSON, no markdown, no explanation:
+{"found": true, "type": "pdf", "url": "https://...", "note": "Wine list PDF on their website"}
+or
+{"found": true, "type": "webpage", "url": "https://...", "note": "Wine list page on their website"}  
+or
+{"found": false, "url": "", "note": "Could not find wine list for this restaurant online."}`;
+
+                let rawLookup = '';
+                try {
+                    rawLookup = await apiCall([{ role: 'user', content: prompt }], 200);
+                } catch (apiErr) {
+                    if (apiErr.message === 'No API key') {
+                        renderRestaurantNotFound('No API key set — please add your Anthropic key on the start screen.');
+                        return;
+                    }
+                    throw apiErr;
+                }
+                const clean = rawLookup.replace(/```json|```/g, '').trim();
+
+                let result;
+                try { result = JSON.parse(clean); }
+                catch { result = { found: false, url: '', note: 'Could not parse response.' }; }
+
+                state.restaurant.found = result.found;
+                state.restaurant.url = result.url || '';
+                state.restaurant.note = result.note || '';
+                state.restaurant.type = result.type || '';
+
+                if (result.found && result.url) {
+                    renderRestaurantFound(result);
+                } else {
+                    renderRestaurantNotFound(result.note || `No wine list found online for "${name}".`);
+                }
+
+            } catch (err) {
+                console.error('Restaurant lookup failed:', err);
+                renderRestaurantNotFound('Search failed — please upload the menu manually.');
+            }
+        }
+
+        function renderRestaurantFound(result) {
+            app.innerHTML = `
+                <div class="mt-10 fade-in">
+                    <div class="ornament mb-6">WINE LIST FOUND</div>
+                    <h2 class="font-display text-3xl mb-2">${state.restaurant.name}</h2>
+                    <p class="text-stone-400 text-xs mb-8 leading-relaxed">${result.note}</p>
+
+                    <div class="wine-card p-5 rounded-2xl mb-6">
+                        <span class="text-[10px] font-bold text-green-400 uppercase tracking-widest">${result.type === 'pdf' ? '📄 PDF Found' : '🌐 Webpage Found'}</span>
+                        <p class="text-stone-300 text-xs mt-2 break-all leading-relaxed">${result.url}</p>
+                    </div>
+
+                    <button onclick="openWineList('${result.url}', '${result.type}')" class="btn-primary w-full p-4 rounded-2xl font-semibold text-sm tracking-widest uppercase mb-4">
+                        Open Wine List →
+                    </button>
+
+                    <div class="ornament my-4 text-[10px]">OR</div>
+                    <button onclick="document.getElementById('cam3').click()" class="option-btn w-full p-4 rounded-2xl text-sm text-stone-400 mb-2">
+                        📸 Upload menu photo / PDF instead
+                    </button>
+                    <input type="file" id="cam3" accept="image/*,application/pdf" class="hidden" multiple onchange="handleFile(event)">
+                    <button onclick="renderAskSommelier()" class="text-stone-600 text-xs mt-4 block w-full text-center underline underline-offset-4">
+                        None of these work
+                    </button>
+                </div>`;
+        }
+
+        function renderRestaurantNotFound(note) {
+            app.innerHTML = `
+                <div class="mt-10 fade-in">
+                    <div class="ornament mb-6">NOT FOUND ONLINE</div>
+                    <h2 class="font-display text-3xl mb-2">${state.restaurant.name || 'Wine List'}</h2>
+                    <p class="text-stone-400 text-xs mb-8 leading-relaxed">${note}</p>
+
+                    <div class="space-y-3 stagger">
+                        <button onclick="document.getElementById('cam4').click()" class="btn-primary w-full p-5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-3">
+                            <span>📸</span> Upload Menu (PDF or Photos)
+                        </button>
+                        <input type="file" id="cam4" accept="image/*,application/pdf" class="hidden" multiple onchange="handleFile(event)">
+
+                        <button onclick="state.step='RESTAURANT'; render()" class="option-btn w-full p-4 rounded-2xl text-sm text-stone-400">
+                            Try a different restaurant name
+                        </button>
+
+                        <button onclick="renderAskSommelier()" class="text-stone-600 text-xs mt-2 block w-full text-center underline underline-offset-4">
+                            Neither option works
+                        </button>
+                    </div>
+                </div>`;
+        }
+
+        // ── Open wine list — try auto-scan via proxies, fall back to open-in-tab + upload ──
+        async function openWineList(url, type) {
+            state.step = 'SCANNING';
+            state.menuWines = [];
+            render();
+
+            // Try three proxies in sequence to auto-fetch the PDF
+            const proxies = [
+                `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+                `https://corsproxy.io/?${encodeURIComponent(url)}`,
+                `https://thingproxy.freeboard.io/fetch/${url}`
+            ];
+
+            for (const proxyUrl of proxies) {
+                try {
+                    const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(7000) });
+                    if (!resp.ok) continue;
+                    const arrayBuffer = await resp.arrayBuffer();
+                    // Verify it's actually a PDF (starts with %PDF magic bytes)
+                    const header = new Uint8Array(arrayBuffer.slice(0, 4));
+                    const looksLikePdf = header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46;
+                    if (!looksLikePdf) continue;
+                    const file = new File([arrayBuffer], 'wine-list.pdf', { type: 'application/pdf' });
+                    await scanPdfAllPages(file);
+                    if (state.menuWines.length > 0) {
+                        state.step = 'TYPE';
+                        render();
+                        return; // Success
+                    }
+                } catch { /* try next */ }
+            }
+
+            // All proxies failed — open in new tab and guide user to upload
+            window.open(url, '_blank');
+            renderPdfOpenedUpload();
+        }
+
+        function renderPdfOpenedUpload() {
+            app.innerHTML = `
+                <div class="mt-10 fade-in">
+                    <div class="ornament mb-6">WINE LIST OPENED</div>
+                    <h2 class="font-display text-3xl mb-2">One more step</h2>
+                    <p class="text-stone-400 text-xs mb-6 leading-relaxed">
+                        The wine list has opened in a new tab. To scan it, upload it below.
+                    </p>
+                    <div class="wine-card p-5 rounded-2xl mb-8 text-left">
+                        <p class="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-3">How to upload it</p>
+                        <div class="text-stone-400 text-xs space-y-3 leading-relaxed">
+                            <div>→ <strong class="text-stone-300">On your phone:</strong> Screenshot each page, then tap Upload below.</div>
+                            <div>→ <strong class="text-stone-300">On desktop:</strong> Save the PDF, then click Upload below.</div>
+                        </div>
+                    </div>
+                    <button onclick="document.getElementById('cam-pdf-upload').click()" class="btn-primary w-full p-5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-3 mb-4">
+                        <span>📸</span> Upload Screenshots or PDF
+                    </button>
+                    <input type="file" id="cam-pdf-upload" accept="image/*,application/pdf" class="hidden" multiple onchange="handleFile(event)">
+                    <button onclick="renderAskSommelier()" class="text-stone-600 text-xs block w-full text-center underline underline-offset-4">
+                        Can't upload — ask the sommelier instead
+                    </button>
+                </div>`;
+        }
+
+        function renderScanning() {
+            app.innerHTML = `
+                <div class="mt-24 text-center fade-in">
+                    <div class="spinner mx-auto mb-6"></div>
+                    <h2 class="font-display text-2xl mb-2">Reading the menu…</h2>
+                    <p class="text-stone-500 text-xs">Scanning wines & prices. Takes ~10 seconds.</p>
+                </div>`;
+        }
+
+        function renderThinking() {
+            app.innerHTML = `
+                <div class="mt-24 text-center fade-in">
+                    <div class="mb-6 flex justify-center gap-2">
+                        <div class="thinking-dot w-3 h-3 rounded-full bg-red-700"></div>
+                        <div class="thinking-dot w-3 h-3 rounded-full bg-red-700"></div>
+                        <div class="thinking-dot w-3 h-3 rounded-full bg-red-700"></div>
+                    </div>
+                    <h2 class="font-display text-2xl mb-2">Consulting the cellar…</h2>
+                    <p class="text-stone-500 text-xs">Our sommelier is selecting your wines</p>
+                </div>`;
+        }
+
+        function backBtn(step) {
+            return `<button onclick="state.step='${step}'; render()" class="flex items-center gap-2 text-stone-600 text-xs mb-8 hover:text-stone-400 transition-colors">← Back</button>`;
+        }
+
+        function skipBtn(fn) {
+            return `<button onclick="${fn}()" class="text-stone-600 text-[11px] block w-full text-center mt-5 hover:text-stone-400 transition-colors tracking-wide">No preference — skip this step →</button>`;
+        }
+
+        function skipCountry()     { state.choices.countries = []; state.choices.regions = []; state.choices._regionKeys = []; state.step = 'GRAPE'; render(); }
+        function skipRegion()      { state.choices.regions = []; state.step = 'GRAPE'; render(); }
+        function skipBudget()      { state.choices.budget = ''; state.step = 'TASTE'; render(); }
+        function skipBudgetRange() { state.choices.budget = ''; state.choices.budgetMin = undefined; state.choices.budgetMax = undefined; state.step = 'TASTE'; render(); }
+        function skipTaste()       { state.choices.tastes = []; getRecommendations(); }
+
+        function renderQuiz(title, opts, key, nextStep) {
+            const prevStep = key === 'type' ? 'START' : 'TYPE';
+            app.innerHTML = `
+                <div class="mt-10 fade-in">
+                    ${backBtn(prevStep)}
+                    ${progressBar(state.step)}
+                    <h2 class="font-display text-3xl mb-8 leading-tight">${title}</h2>
+                    <div class="grid gap-3 stagger">
+                        ${opts.map(o => `
+                            <button onclick="state.choices['${key}']='${o}'; state.step='${nextStep}'; render()"
+                                class="option-btn p-5 rounded-2xl text-left font-light text-stone-200 text-sm tracking-wide">
+                                ${o}
+                            </button>`).join('')}
+                    </div>
+                </div>`;
+        }
+
+        // ── Country / origin ──
+        const COUNTRIES = {
+            'Red':      ['🇫🇷 France', '🇮🇹 Italy', '🇪🇸 Spain', '🇵🇹 Portugal', '🇦🇺 Australia', '🇺🇸 USA', '🇦🇷 Argentina', '🇿🇦 South Africa', '🇳🇿 New Zealand', '🇩🇪 Germany', '🇦🇹 Austria'],
+            'White':    ['🇫🇷 France', '🇮🇹 Italy', '🇦🇹 Austria', '🇩🇪 Germany', '🇪🇸 Spain', '🇳🇿 New Zealand', '🇦🇺 Australia', '🇺🇸 USA', '🇬🇷 Greece', '🇵🇹 Portugal', '🇿🇦 South Africa'],
+            'Sparkling': ['🇫🇷 Champagne (France)', '🇮🇹 Prosecco (Italy)', '🇪🇸 Cava (Spain)', '🇬🇧 English Sparkling', '🇩🇪 Sekt (Germany)', '🇦🇺 Australia'],
+            'Rosé':      ['🇫🇷 France (Provence)', '🇮🇹 Italy', '🇪🇸 Spain', '🇵🇹 Portugal', '🇺🇸 USA', '🇦🇺 Australia', '🇿🇦 South Africa', '🇬🇷 Greece']
+        };
+
+        const REGIONS = {
+            'France-Red':    ['Burgundy', 'Bordeaux', 'Rhône Valley', 'Loire Valley', 'Languedoc', 'Provence'],
+            'France-White':  ['Burgundy', 'Bordeaux', 'Alsace', 'Loire Valley', 'Rhône Valley', 'Chablis'],
+            'Italy-Red':     ['Piedmont (Barolo/Barbaresco)', 'Tuscany (Chianti/Brunello)', 'Veneto (Amarone)', 'Sicily'],
+            'Italy-White':   ['Alto Adige', 'Friuli', 'Soave (Veneto)', 'Sicily'],
+            'Spain-Red':     ['Rioja', 'Ribera del Duero', 'Priorat', 'Galicia'],
+            'Spain-White':   ['Galicia (Albariño)', 'Rioja', 'Rueda'],
+            'Portugal-Red':  ['Douro', 'Alentejo', 'Dão'],
+            'Portugal-White':['Vinho Verde', 'Douro', 'Alentejo'],
+            'Australia-Red': ['Barossa Valley', 'McLaren Vale', 'Margaret River', 'Yarra Valley'],
+            'Australia-White':['Clare Valley (Riesling)', 'Margaret River', 'Adelaide Hills'],
+            'USA-Red':       ['Napa Valley', 'Sonoma', 'Oregon (Pinot Noir)', 'Washington State'],
+            'USA-White':     ['Napa Valley', 'Sonoma', 'Willamette Valley (Oregon)'],
+            'Argentina-Red': ['Mendoza (Malbec)', 'Patagonia', 'Salta'],
+            'South Africa-Red':  ['Stellenbosch', 'Swartland', 'Hemel-en-Aarde'],
+            'South Africa-White':['Stellenbosch', 'Swartland', 'Constantia'],
+            'New Zealand-Red':   ['Central Otago (Pinot Noir)', 'Marlborough', 'Hawkes Bay'],
+            'New Zealand-White': ['Marlborough (Sauvignon Blanc)', 'Central Otago', 'Hawkes Bay'],
+            'Germany-White': ['Mosel (Riesling)', 'Rheingau', 'Pfalz', 'Rheinhessen'],
+            'Germany-Red':   ['Pinot Noir (Spätburgunder)'],
+            'Austria-White': ['Wachau (Grüner Veltliner/Riesling)', 'Kamptal', 'Styria'],
+            'Austria-Red':   ['Burgenland'],
+            'Greece-White':  ['Santorini (Assyrtiko)'],
+            'Greece-Red':    ['Naoussa (Xinomavro)'],
+            'France-Rosé':   ['Provence', 'Languedoc', 'Loire Valley', 'Tavel (Rhône)'],
+            'Italy-Rosé':    ['Bardolino Chiaretto', 'Abruzzo (Cerasuolo)', 'Sicily'],
+            'Spain-Rosé':    ['Navarra', 'Rioja', 'Penedès'],
+        };
+
+        // ── Multi-select helpers ──
+        // ── Shared nav footer: ← Back (left) and Skip (right), inline ──
+        function navFooter(backStep, skipFn) {
+            return `
+                <div class="flex items-center justify-between mt-5">
+                    <button onclick="state.step='${backStep}'; render()" class="text-stone-400 text-xs hover:text-stone-200 transition-colors">← Back</button>
+                    <button onclick="${skipFn}()" class="text-stone-400 text-xs hover:text-stone-200 transition-colors">No preference — skip →</button>
+                </div>`;
+        }
+
+        const MAX_SEL = 3;
+
+        function toggleItem(arr, item, max) {
+            const idx = arr.indexOf(item);
+            if (idx > -1) arr.splice(idx, 1);
+            else if (!max || arr.length < max) arr.push(item);
+        }
+
+        function multiSelectClass(arr, item) {
+            return arr.includes(item) ? 'selected' : '';
+        }
+
+        // ── COUNTRY — multi-select, max 3 ──
+        function renderCountry() {
+            const typeRaw = state.choices.type.replace(/[^\w\sé]/g, '').trim();
+            const typeKey = typeRaw.startsWith('Ros') ? 'Rosé' : typeRaw;
+            const options = COUNTRIES[typeKey] || COUNTRIES['Red'];
+            if (!state.choices.countries) state.choices.countries = [];
+            app.innerHTML = `
+                <div class="mt-10 fade-in">
+                    ${progressBar('COUNTRY')}
+                    <h2 class="font-display text-3xl mb-1 leading-tight">2. Any country preference?</h2>
+                    <p class="text-stone-500 text-xs mb-5">Select up to ${MAX_SEL} — or skip for no preference</p>
+                    <div class="grid gap-2 mb-5" style="max-height:52vh; overflow-y:auto; padding-right:4px;">
+                        ${options.map((o, i) => `
+                            <button id="country-btn-${i}" onclick="toggleCountry(${i}, '${o}')"
+                                class="taste-btn ${multiSelectClass(state.choices.countries, o)} p-4 rounded-2xl text-left text-sm text-stone-200">
+                                ${o}
+                            </button>`).join('')}
+                    </div>
+                    <button onclick="confirmCountries()" class="btn-primary w-full p-4 rounded-2xl font-semibold text-sm tracking-widest uppercase">
+                        Continue →
+                    </button>
+                    ${navFooter('TYPE', 'skipCountry')}
+                </div>`;
+            window._currentCountryOptions = options;
+        }
+
+        function toggleCountry(idx, option) {
+            if (!state.choices.countries) state.choices.countries = [];
+            toggleItem(state.choices.countries, option, MAX_SEL);
+            const btn = document.getElementById('country-btn-' + idx);
+            if (btn) btn.classList.toggle('selected', state.choices.countries.includes(option));
+        }
+
+        function confirmCountries() {
+            const typeRaw = state.choices.type.replace(/[^\w\sé]/g, '').trim();
+            const typeKey = typeRaw.startsWith('Ros') ? 'Rosé' : typeRaw;
+            const noParens = /🇫🇷|🇮🇹|🇪🇸|🇵🇹|🇦🇺|🇺🇸|🇦🇷|🇿🇦|🇳🇿|🇩🇪|🇦🇹|🇬🇧|🇬🇷|🌍|\s*\(.*?\)/g;
+            const regionKeys = (state.choices.countries || [])
+                .map(c => `${c.replace(noParens, '').trim()}-${typeKey}`)
+                .filter(k => REGIONS[k] && REGIONS[k].length > 0
+                    && !state.choices.countries.some(c => c.includes('Champagne') || c.includes('Prosecco') || c.includes('Cava') || c.includes('English')));
+            state.choices._regionKeys = regionKeys;
+            state.choices.regions = [];
+            state.step = regionKeys.length > 0 ? 'REGION' : 'GRAPE';
+            render();
+        }
+
+        // ── REGION — multi-select, max 3, merged across all selected countries ──
+        function renderRegion() {
+            const keys = state.choices._regionKeys || [];
+            const seen = new Set();
+            const options = keys.flatMap(k => (REGIONS[k] || []).filter(r => !seen.has(r) && seen.add(r)));
+            const countryDisplay = (state.choices.countries || [])
+                .map(c => c.replace(/🇫🇷|🇮🇹|🇪🇸|🇵🇹|🇦🇺|🇺🇸|🇦🇷|🇿🇦|🇳🇿|🇩🇪|🇦🇹|🇬🇧|🇬🇷|🌍/g, '').replace(/\(.*?\)/g, '').trim())
+                .join(', ');
+            if (!state.choices.regions) state.choices.regions = [];
+            app.innerHTML = `
+                <div class="mt-10 fade-in">
+                    ${progressBar('REGION')}
+                    <h2 class="font-display text-3xl mb-1 leading-tight">3. Any region preference?</h2>
+                    <p class="text-stone-500 text-xs mb-5">${countryDisplay} · Select up to ${MAX_SEL} — or skip</p>
+                    <div class="grid gap-2 mb-5" style="max-height:52vh; overflow-y:auto; padding-right:4px;">
+                        ${options.map((o, i) => `
+                            <button id="region-btn-${i}" onclick="toggleRegion(${i}, '${o}')"
+                                class="taste-btn ${multiSelectClass(state.choices.regions, o)} p-4 rounded-2xl text-left text-sm text-stone-200">
+                                ${o}
+                            </button>`).join('')}
+                    </div>
+                    <button onclick="confirmRegions()" class="btn-primary w-full p-4 rounded-2xl font-semibold text-sm tracking-widest uppercase">
+                        Continue →
+                    </button>
+                    ${navFooter('COUNTRY', 'skipRegion')}
+                </div>`;
+            window._currentRegionOptions = options;
+        }
+
+        function toggleRegion(idx, option) {
+            if (!state.choices.regions) state.choices.regions = [];
+            toggleItem(state.choices.regions, option, MAX_SEL);
+            const btn = document.getElementById('region-btn-' + idx);
+            if (btn) btn.classList.toggle('selected', state.choices.regions.includes(option));
+        }
+
+        function confirmRegions() { state.step = 'GRAPE'; render(); }
+
+        // ── Grape varieties ──
+        const GRAPES = {
+            Red: [
+                { name: 'Pinot Noir', note: 'Elegant, silky, red fruits · Burgundy, Oregon, NZ' },
+                { name: 'Cabernet Sauvignon', note: 'Full-bodied, structured, blackcurrant · Bordeaux, Napa' },
+                { name: 'Merlot', note: 'Soft, plummy, approachable · Bordeaux, Tuscany' },
+                { name: 'Syrah / Shiraz', note: 'Spicy, dark fruit, peppery · Rhône, Barossa' },
+                { name: 'Grenache', note: 'Juicy, berry-forward, lower tannin · Rhône, Priorat' },
+                { name: 'Nebbiolo', note: 'Powerful, tannic, roses & tar · Barolo, Barbaresco' },
+                { name: 'Sangiovese', note: 'Earthy, cherry, high acid · Chianti, Brunello' },
+                { name: 'Tempranillo', note: 'Leather, red fruit, savoury · Rioja, Ribera del Duero' },
+                { name: 'Malbec', note: 'Velvety, dark plum, smoky · Mendoza, Cahors' },
+                { name: 'Zinfandel', note: 'Bold, jammy, spicy · California' },
+                { name: 'Cabernet Franc', note: 'Herbal, red pepper, lighter · Loire, Bordeaux' },
+                { name: 'Barbera', note: 'Bright acidity, dark cherry · Piedmont' },
+                { name: 'Mourvèdre', note: 'Meaty, dark fruit, earthy · Bandol, Rhône blends' },
+                { name: 'Gamay', note: 'Light, fresh, berry · Beaujolais' },
+            ],
+            White: [
+                { name: 'Chardonnay', note: 'Versatile, apple to tropical · Burgundy, California' },
+                { name: 'Sauvignon Blanc', note: 'Crisp, grassy, citrus · Loire, Marlborough' },
+                { name: 'Riesling', note: 'High acid, floral, petrol with age · Mosel, Alsace' },
+                { name: 'Pinot Grigio / Gris', note: 'Light & crisp or rich & spicy · Italy, Alsace' },
+                { name: 'Grüner Veltliner', note: 'Peppery, mineral, dry · Wachau, Kamptal' },
+                { name: 'Chenin Blanc', note: 'Honey, quince, great ageing · Loire, South Africa' },
+                { name: 'Viognier', note: 'Aromatic, peach, full-bodied · Condrieu, Rhône' },
+                { name: 'Gewürztraminer', note: 'Intensely aromatic, lychee, rose · Alsace' },
+                { name: 'Albariño', note: 'Zesty, stone fruit, saline · Galicia, Vinho Verde' },
+                { name: 'Roussanne / Marsanne', note: 'Rich, herbal, nutty · Rhône, Languedoc' },
+                { name: 'Vermentino', note: 'Fresh, citrus, slightly bitter · Sardinia, Provence' },
+                { name: 'Assyrtiko', note: 'Mineral, volcanic, high acid · Santorini' },
+                { name: 'Verdejo', note: 'Crisp, herbal, nutty · Rueda, Spain' },
+                { name: 'Pinot Blanc', note: 'Soft, apple, understated · Alsace, Alto Adige' },
+            ],
+            Sparkling: [
+                { name: 'Chardonnay', note: 'Elegance, finesse, citrus · Blanc de Blancs Champagne' },
+                { name: 'Pinot Noir', note: 'Structure, red fruit · Blanc de Noirs Champagne' },
+                { name: 'Pinot Meunier', note: 'Soft, fruity, early drinking · Champagne blends' },
+                { name: 'Glera', note: 'Light, floral, pear · Prosecco' },
+                { name: 'Macabeo / Xarello / Parellada', note: 'Fresh, nutty · Cava blend' },
+                { name: 'Pinot Noir / Chardonnay blend', note: 'Classic Champagne balance' },
+            ],
+            Rosé: [
+                { name: 'Grenache', note: 'Pale, delicate, strawberry · Provence classic' },
+                { name: 'Pinot Noir', note: 'Elegant, red fruit, light · Burgundy, Champagne rosé' },
+                { name: 'Syrah', note: 'Deeper colour, spice, dark berry · Tavel, Languedoc' },
+                { name: 'Sangiovese', note: 'Dry, cherry, savoury · Cerasuolo, Abruzzo' },
+                { name: 'Tempranillo', note: 'Fruity, medium-bodied · Navarra, Rioja' },
+                { name: 'Mourvèdre', note: 'Structured, earthy, Provençal · Bandol Rosé' },
+                { name: 'Cinsault', note: 'Light, fresh, floral · Provence blends' },
+                { name: 'Merlot', note: 'Soft, plummy, approachable · various regions' },
+                { name: 'Xinomavro', note: 'Vibrant, savoury, mineral · Greece' },
+            ]
+        };
+
+        // ── GRAPE — multi-select ──
+        // ── GRAPE — multi-select, max 3 ──
+        function renderGrape() {
+            const typeRaw = state.choices.type;
+            const typeClean = typeRaw.replace(/[^\w\sé]/g, '').trim();
+            const typeKey = typeClean.startsWith('Ros') ? 'Rosé' : typeClean;
+            const grapes = GRAPES[typeKey] || GRAPES.Red;
+            if (!state.choices.grapes) state.choices.grapes = [];
+            app.innerHTML = `
+                <div class="mt-10 fade-in">
+                    ${progressBar('GRAPE')}
+                    <h2 class="font-display text-3xl mb-1 leading-tight">4. Any grape preference?</h2>
+                    <p class="text-stone-500 text-xs mb-5">Select up to ${MAX_SEL} — or skip for no preference</p>
+                    <div class="grid gap-2 mb-5" style="max-height:52vh; overflow-y:auto; padding-right:4px;">
+                        ${grapes.map((g, i) => `
+                            <button id="grape-btn-${i}" onclick="toggleGrape(${i})"
+                                class="taste-btn ${state.choices.grapes.includes(g.name) ? 'selected' : ''} p-4 rounded-2xl text-left">
+                                <div class="text-sm">${g.name}</div>
+                                <div class="text-[10px] opacity-60 mt-0.5">${g.note}</div>
+                            </button>`).join('')}
+                    </div>
+                    <button onclick="confirmGrapes()" class="btn-primary w-full p-4 rounded-2xl font-semibold text-sm tracking-widest uppercase">
+                        Continue →
+                    </button>
+                    ${navFooter('REGION', 'skipGrape')}
+                </div>`;
+            window._currentGrapes = grapes;
+        }
+
+        function toggleGrape(idx) {
+            if (!state.choices.grapes) state.choices.grapes = [];
+            const g = window._currentGrapes[idx];
+            if (!g) return;
+            toggleItem(state.choices.grapes, g.name, MAX_SEL);
+            const btn = document.getElementById('grape-btn-' + idx);
+            if (btn) btn.classList.toggle('selected', state.choices.grapes.includes(g.name));
+        }
+
+        function confirmGrapes() { state.step = 'BUDGET'; render(); }
+        function skipGrape()     { state.choices.grapes = []; state.step = 'BUDGET'; render(); }
+
+        function renderBudgetMode() {
+            app.innerHTML = `
+                <div class="mt-10 fade-in">
+                    ${progressBar('BUDGET')}
+                    <h2 class="font-display text-3xl mb-3 leading-tight">5. How would you like to approach the budget?</h2>
+                    <p class="text-stone-500 text-xs mb-8">Choose how we should filter your recommendations</p>
+                    <div class="grid gap-4 stagger">
+
+                        <button onclick="state.step='BUDGET_RANGE'; render()"
+                            class="option-btn p-5 rounded-2xl text-left">
+                            <div class="text-sm font-semibold text-stone-200 mb-1">💰 Set a budget range</div>
+                            <div class="text-xs text-stone-500 leading-relaxed">Choose a minimum and maximum price — we'll only recommend wines within that range.</div>
+                        </button>
+
+                        <button onclick="state.choices.budget='best-value'; state.step='TASTE'; render()"
+                            class="option-btn p-5 rounded-2xl text-left">
+                            <div class="text-sm font-semibold text-stone-200 mb-1">🏆 Best quality closest to retail value</div>
+                            <div class="text-xs text-stone-500 leading-relaxed">Find wines whose restaurant price is closest to what you'd pay in a shop — maximum quality for the markup.</div>
+                        </button>
+
+                    </div>
+                    ${navFooter('GRAPE', 'skipBudget')}
+                </div>`;
+        }
+
+        function renderBudgetRange() {
+            app.innerHTML = `
+                <div class="mt-10 fade-in">
+                    ${progressBar('BUDGET')}
+                    <h2 class="font-display text-3xl mb-3 leading-tight">5. Set your budget range</h2>
+                    <p class="text-stone-500 text-xs mb-8">We'll only recommend wines within these prices</p>
+
+                    <div class="grid grid-cols-2 gap-4 mb-8">
+                        <div>
+                            <label class="text-stone-500 text-[10px] uppercase tracking-widest block mb-2">Minimum £</label>
+                            <input id="budget-min" type="number" min="0" max="999" placeholder="0"
+                                class="w-full p-4 rounded-2xl text-white text-sm outline-none text-center"
+                                style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);">
+                        </div>
+                        <div>
+                            <label class="text-stone-500 text-[10px] uppercase tracking-widest block mb-2">Maximum £</label>
+                            <input id="budget-max" type="number" min="0" max="9999" placeholder="100"
+                                class="w-full p-4 rounded-2xl text-white text-sm outline-none text-center"
+                                style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);">
+                        </div>
+                    </div>
+
+                    <p id="budget-error" class="text-red-500 text-xs text-center mb-4 hidden">Please enter a valid range (max must be greater than min)</p>
+
+                    <button onclick="confirmBudgetRange()" class="btn-primary w-full p-4 rounded-2xl font-semibold text-sm tracking-widest uppercase">
+                        Set Budget & Continue →
+                    </button>
+                    ${navFooter('BUDGET', 'skipBudgetRange')}
+                </div>`;
+        }
+
+        function confirmBudgetRange() {
+            const min = parseFloat(document.getElementById('budget-min').value) || 0;
+            const max = parseFloat(document.getElementById('budget-max').value);
+            const errEl = document.getElementById('budget-error');
+
+            if (!max || max <= min) {
+                errEl.classList.remove('hidden');
+                return;
+            }
+
+            state.choices.budget = `£${min}–£${max}`;
+            state.choices.budgetMin = min;
+            state.choices.budgetMax = max;
+            state.step = 'TASTE';
+            render();
+        }
+
+        function renderTaste() {
+            const options = ['Dry', 'Fruity', 'Full Bodied', 'Light & Crisp', 'Acidic', 'Sweet', 'Tannic', 'Earthy'];
+            app.innerHTML = `
+                <div class="mt-10 fade-in">
+                    ${progressBar('TASTE')}
+                    <h2 class="font-display text-3xl mb-2">6. Taste preferences?</h2>
+                    <p class="text-stone-500 text-xs mb-6">Select all that apply</p>
+                    <div class="grid grid-cols-2 gap-3 mb-8">
+                        ${options.map(t => `
+                            <button onclick="toggleTaste('${t}')" id="taste-${t.replace(/\s/g,'-')}"
+                                class="taste-btn ${state.choices.tastes.includes(t) ? 'selected' : ''} p-4 rounded-xl text-sm">
+                                ${t}
+                            </button>`).join('')}
+                    </div>
+                    <button onclick="getRecommendations()" class="btn-primary w-full p-4 rounded-2xl font-semibold text-sm tracking-widest uppercase">
+                        Get My Recommendations →
+                    </button>
+                    ${navFooter('BUDGET', 'skipTaste')}
+                </div>`;
+        }
+
+        function toggleTaste(t) {
+            if (state.choices.tastes.includes(t)) {
+                state.choices.tastes = state.choices.tastes.filter(x => x !== t);
+            } else {
+                state.choices.tastes.push(t);
+            }
+            // Toggle just the clicked button without full re-render
+            const btn = document.getElementById('taste-' + t.replace(/\s/g, '-'));
+            if (btn) btn.classList.toggle('selected', state.choices.tastes.includes(t));
+        }
+
+        function renderResults() {
+            if (state.error) {
+                app.innerHTML = `
+                    <div class="mt-10 fade-in">
+                        <h2 class="font-display text-3xl text-red-500 text-center mb-4">Something went wrong</h2>
+                        <p class="text-stone-400 text-sm text-center mb-8">${state.error}</p>
+                        <button onclick="state.step='START'; state.error=null; render()" class="btn-primary w-full p-4 rounded-2xl font-semibold text-sm">
+                            Try Again
+                        </button>
+                    </div>`;
+                return;
+            }
+
+            const recs = state.recommendations;
+            if (!recs || !recs.length) {
+                state.error = "No recommendations returned. Please try again.";
+                renderResults(); return;
+            }
+
+            const { type, countries, regions, grapes, budget, tastes } = state.choices;
+
+            // ── Build summary rows ──
+            const typeClean = type.replace(/[^\w\sé]/g, '').trim();
+            const flagRe = /🇫🇷|🇮🇹|🇪🇸|🇵🇹|🇦🇺|🇺🇸|🇦🇷|🇿🇦|🇳🇿|🇩🇪|🇦🇹|🇬🇧|🇬🇷|🌍/g;
+            const countriesClean = (countries || []).map(c => c.replace(flagRe, '').replace(/\(.*?\)/g, '').trim()).join(', ');
+
+            const summaryRows = [
+                state.restaurant.name
+                    ? { label: 'Restaurant', value: state.restaurant.name }
+                    : null,
+                { label: 'Wine type', value: typeClean },
+                countriesClean
+                    ? { label: countries.length > 1 ? 'Countries' : 'Country', value: countriesClean }
+                    : null,
+                (regions && regions.length > 0)
+                    ? { label: regions.length > 1 ? 'Regions' : 'Region', value: regions.join(', ') }
+                    : null,
+                (grapes && grapes.length > 0)
+                    ? { label: grapes.length > 1 ? 'Grapes' : 'Grape', value: grapes.join(', ') }
+                    : null,
+                budget === 'best-value'
+                    ? { label: 'Budget', value: 'Best quality vs. retail value' }
+                    : budget
+                    ? { label: 'Budget', value: budget }
+                    : null,
+                tastes.length > 0
+                    ? { label: 'Tastes', value: tastes.join(', ') }
+                    : null,
+            ].filter(Boolean);
+
+            const labels = ['Top Match', 'Best Value', 'Sommelier\'s Pick', 'Hidden Gem'];
+            const labelColors = ['text-amber-400', 'text-green-400', 'text-red-400', 'text-purple-400'];
+
+            app.innerHTML = `
+                <div class="mt-8 fade-in">
+                    <div class="ornament mb-6">TONIGHT'S ORDER</div>
+
+                    <!-- ── Selections summary ── -->
+                    <div class="wine-card p-5 rounded-2xl mb-8">
+                        <p class="text-[10px] font-bold text-stone-500 uppercase tracking-widest mb-4">Your selections</p>
+                        <div class="space-y-2">
+                            ${summaryRows.map(row => `
+                                <div class="flex justify-between items-baseline gap-4">
+                                    <span class="text-stone-600 text-[11px] uppercase tracking-widest shrink-0">${row.label}</span>
+                                    <span class="text-stone-200 text-xs text-right leading-snug">${row.value}</span>
+                                </div>`).join('')}
+                        </div>
+                    </div>
+
+                    <h2 class="font-display text-3xl text-center mb-2">Recommendations</h2>
+                    <p class="text-stone-500 text-xs text-center mb-8">Curated for your palate by AI sommelier</p>
+
+                    <div class="space-y-4 stagger">
+                        ${recs.map((w, i) => `
+                            <div class="wine-card p-5 rounded-2xl">
+                                <span class="text-[10px] font-bold ${labelColors[i] || 'text-red-400'} uppercase tracking-widest">${labels[i] || 'Recommended'}</span>
+                                <h3 class="font-display text-xl mt-1 leading-snug">${w.name}</h3>
+                                ${w.price ? `<p class="text-stone-400 text-sm mt-1">${w.price}</p>` : ''}
+                                ${w.why ? `<p class="text-stone-400 text-xs mt-3 leading-relaxed border-t border-stone-800 pt-3">${w.why}</p>` : ''}
+                            </div>`).join('')}
+                    </div>
+
+                    <div class="mt-10 text-center space-y-3">
+                        <div>
+                            <button onclick="state.step='TASTE'; render()" class="flex items-center gap-2 text-stone-400 text-xs hover:text-stone-200 transition-colors mx-auto">← Adjust preferences</button>
+                        </div>
+                        <div>
+                            <button onclick="newSelectionSameList()" class="text-stone-400 text-xs hover:text-stone-200 transition-colors tracking-wide">
+                                🔄 New selection — same wine list
+                            </button>
+                        </div>
+                        <div>
+                            <button onclick="startOver()" class="text-stone-600 text-xs hover:text-stone-400 transition-colors tracking-wide underline underline-offset-4">
+                                Scan Another Menu
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        // ── Ask the sommelier — shown when no wine data can be obtained ──
+        function renderAskSommelier() {
+            app.innerHTML = `
+                <div class="mt-16 text-center fade-in">
+                    <div class="text-5xl mb-6">🍷</div>
+                    <div class="ornament mb-6">OUR RECOMMENDATION</div>
+                    <h2 class="font-display text-4xl mb-4 leading-tight">Ask Your Sommelier</h2>
+                    <p class="text-stone-400 text-sm mb-8 leading-relaxed max-w-xs mx-auto">
+                        Without access to the wine list, we can't make a reliable recommendation.
+                        Your best next step is to speak to the restaurant's own sommelier — they know the list inside out and can match a wine to your taste instantly.
+                    </p>
+                    <div class="wine-card p-5 rounded-2xl mb-8 text-left">
+                        <p class="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-3">What to ask them</p>
+                        <ul class="text-stone-400 text-xs space-y-2 leading-relaxed">
+                            <li>→ "What's your best value red / white / sparkling?"</li>
+                            <li>→ "Which wine on the list has the lowest markup?"</li>
+                            <li>→ "What would you recommend for someone who enjoys [dry / fruity / full-bodied]?"</li>
+                        </ul>
+                    </div>
+                    <button onclick="state.step='START'; render()" class="text-stone-600 text-xs underline underline-offset-4 hover:text-stone-400 transition-colors">
+                        ← Try again with a menu
+                    </button>
+                </div>`;
+        }
+
+        // ── File handling — supports multi-page PDFs and multiple images ──
+        async function handleFile(event) {
+            const files = Array.from(event.target.files);
+            if (!files.length) return;
+
+            state.step = 'SCANNING';
+            state.menuWines = [];
+            render();
+
+            try {
+                const isPdf = files.length === 1 && files[0].type === 'application/pdf';
+
+                if (isPdf) {
+                    await scanPdfAllPages(files[0]);
+                } else {
+                    // Multiple images (or single image) — scan each in turn
+                    await scanMultipleImages(files);
+                }
+            } catch (err) {
+                console.error('Scan error:', err);
+            }
+
+            // Always proceed — but if nothing was found at all, tell them to ask the sommelier
+            if (state.menuWines.length === 0) {
+                renderAskSommelier();
+            } else {
+                state.step = 'TYPE';
+                render();
+            }
+        }
+
+        // ── Update the scanning progress message on screen ──
+        function updateScanProgress(message, subMessage) {
+            const h = document.querySelector('#scan-message');
+            const s = document.querySelector('#scan-sub');
+            if (h) h.textContent = message;
+            if (s) s.textContent = subMessage;
+        }
+
+        // ── Render scanning screen with progress slots ──
+        function renderScanning(message = 'Reading menu…', sub = 'This takes a few seconds per page') {
+            app.innerHTML = `
+                <div class="mt-24 text-center fade-in">
+                    <div class="spinner mx-auto mb-6"></div>
+                    <h2 id="scan-message" class="font-display text-2xl mb-2">${message}</h2>
+                    <p id="scan-sub" class="text-stone-500 text-xs">${sub}</p>
+                    <div id="scan-progress" class="mt-6 space-y-1 text-left max-w-xs mx-auto"></div>
+                </div>`;
+        }
+
+        // ── Add a page result line to the progress list ──
+        function addScanProgressLine(text, success) {
+            const list = document.getElementById('scan-progress');
+            if (!list) return;
+            const line = document.createElement('div');
+            line.style.cssText = 'font-size:11px; padding:4px 0; display:flex; align-items:center; gap:8px; color: rgba(255,255,255,0.5);';
+            line.innerHTML = `<span style="color:${success ? '#4ade80' : '#f87171'}">${success ? '✓' : '✗'}</span> ${text}`;
+            list.appendChild(line);
+        }
+
+        // ── Scan all pages of a PDF ──
+        async function scanPdfAllPages(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument(new Uint8Array(arrayBuffer)).promise;
+            const totalPages = pdf.numPages;
+
+            renderScanning(`Scanning ${totalPages} page${totalPages > 1 ? 's' : ''}…`, 'Reading every page of the wine list');
+
+            for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                updateScanProgress(
+                    `Scanning page ${pageNum} of ${totalPages}…`,
+                    `Looking for wines and prices`
+                );
+
+                try {
+                    const page = await pdf.getPage(pageNum);
+                    const viewport = page.getViewport({ scale: 2.5 });
+                    const canvas = document.createElement('canvas');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+                    const imageSrc = canvas.toDataURL('image/png');
+                    const found = await extractWinesFromImage(imageSrc);
+                    addScanProgressLine(`Page ${pageNum} — ${found} wine${found !== 1 ? 's' : ''} found`, found >= 0);
+                } catch (err) {
+                    console.error(`Page ${pageNum} failed:`, err);
+                    addScanProgressLine(`Page ${pageNum} — could not be read`, false);
+                }
+            }
+        }
+
+        // ── Scan multiple uploaded image files ──
+        async function scanMultipleImages(files) {
+            renderScanning(
+                `Scanning ${files.length} image${files.length > 1 ? 's' : ''}…`,
+                'Reading each photo for wines and prices'
+            );
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                updateScanProgress(`Scanning image ${i + 1} of ${files.length}…`, file.name);
+                try {
+                    const src = await fileToDataUrl(file);
+                    const found = await extractWinesFromImage(src);
+                    addScanProgressLine(`Image ${i + 1} (${file.name}) — ${found} wine${found !== 1 ? 's' : ''} found`, found >= 0);
+                } catch (err) {
+                    console.error(`Image ${i + 1} failed:`, err);
+                    addScanProgressLine(`Image ${i + 1} — could not be read`, false);
+                }
+            }
+        }
+
+        function fileToDataUrl(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // ── OCR a single image and extract wines — returns count found ──
+        // Deduplicates against wines already in state.menuWines
+        async function extractWinesFromImage(src) {
+            const { data: { text } } = await Tesseract.recognize(src, 'eng');
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            const existingNames = new Set(state.menuWines.map(w => w.name.toLowerCase()));
+            let newCount = 0;
+
+            lines.forEach(line => {
+                const priceMatch = line.match(/[£$€](\d{1,3}(?:\.\d{2})?)|(?<!\d)(\d{2,3})(?!\d)(?!.*\b(19|20)\d{2}\b)/);
+                const yearMatch = line.match(/\b(19|20)\d{2}\b/);
+                if (!priceMatch) return;
+                const price = priceMatch[1] || priceMatch[2];
+                const name = line.replace(priceMatch[0], '').replace(yearMatch?.[0] || '', '').trim();
+                if (name.length < 5 || !/[a-zA-Z]{3,}/.test(name)) return;
+                if (existingNames.has(name.toLowerCase())) return; // skip duplicates
+                existingNames.add(name.toLowerCase());
+                state.menuWines.push({ name, price: `£${price}`, vintage: yearMatch?.[0] || '' });
+                newCount++;
+            });
+
+            return newCount;
+        }
+
+        // ── AI Recommendation Engine (FIX #6 & #7: actual Claude AI integration) ──
+        async function getRecommendations() {
+            state.step = 'THINKING';
+            render();
+
+            const { type, countries, regions, grapes, budget, tastes } = state.choices;
+            const flagRe = /🇫🇷|🇮🇹|🇪🇸|🇵🇹|🇦🇺|🇺🇸|🇦🇷|🇿🇦|🇳🇿|🇩🇪|🇦🇹|🇬🇧|🇬🇷|🌍/g;
+            const countriesClean = (countries || []).map(c => c.replace(flagRe, '').replace(/\(.*?\)/g, '').trim()).join(', ');
+            const originPreference = countriesClean
+                ? `- Country preference: ${countriesClean}${regions && regions.length > 0 ? `\n- Region preference: ${regions.join(', ')}` : ''}`
+                : `- Country/region: No preference`;
+
+            const grapePreference = grapes && grapes.length > 0
+                ? `- Grape varieties: ${grapes.join(', ')}`
+                : `- Grape variety: No preference`;
+
+            // Limit wine list to 80 entries to stay within API token limits
+            // Filter by type preference first if possible, otherwise take first 80
+            const typeCleanForFilter = type.replace(/[^\w\sé]/g, '').trim().toLowerCase();
+            let winesForPrompt = state.menuWines;
+            if (winesForPrompt.length > 80) {
+                // Prioritise wines that match the selected type keywords
+                const typeKeywords = {
+                    'red': ['rouge', 'red', 'pinot', 'cabernet', 'merlot', 'syrah', 'shiraz', 'grenache', 'nebbiolo', 'sangiovese', 'tempranillo', 'malbec', 'gamay', 'zinfandel'],
+                    'white': ['blanc', 'white', 'chardonnay', 'riesling', 'sauvignon', 'pinot gris', 'grüner', 'viognier', 'chenin', 'albariño'],
+                    'sparkling': ['champagne', 'prosecco', 'cava', 'sparkling', 'crémant', 'sekt'],
+                    'rosé': ['rosé', 'rose', 'rosato', 'rosado']
+                };
+                const keywords = typeKeywords[typeCleanForFilter] || [];
+                const matched = winesForPrompt.filter(w =>
+                    keywords.some(k => w.name.toLowerCase().includes(k))
+                );
+                const unmatched = winesForPrompt.filter(w =>
+                    !keywords.some(k => w.name.toLowerCase().includes(k))
+                );
+                winesForPrompt = [...matched, ...unmatched].slice(0, 80);
+            }
+
+            const winesContext = winesForPrompt.length > 0
+                ? `Here are wines from the menu (${state.menuWines.length} total, showing ${winesForPrompt.length} most relevant):\n${winesForPrompt.map(w => `- ${w.name}${w.vintage ? ' ' + w.vintage : ''} — ${w.price}`).join('\n')}${state.choices.budgetMin !== undefined ? `\n\nOnly recommend wines priced between £${state.choices.budgetMin} and £${state.choices.budgetMax}.` : ''}`
+                : `No menu was scanned. Please suggest 4 classic wines based on the preferences below as if recommending from a good restaurant list.`;
+
+            const budgetInstruction = budget === 'best-value'
+                ? `Budget approach: The diner wants the highest quality wine that is closest to its retail/shop price — i.e. wines where the restaurant markup is lowest relative to quality. Prioritise value for money over price range.`
+                : `Budget: ${(budget || '').replace(/[^\w\s£$€\-+]/g, '').trim() || 'No preference'}. ${budget ? 'Only recommend wines within this price range.' : ''}`;
+
+            const prompt = `You are an expert sommelier. A diner is dining at ${state.restaurant.name ? `"${state.restaurant.name}"` : 'a restaurant'} and has the following preferences:
+- Wine type: ${type.replace(/[^\w\sé]/g, '').trim()}
+${originPreference}
+${grapePreference}
+- ${budgetInstruction}
+- Taste preferences: ${tastes.length > 0 ? tastes.join(', ') : 'No strong preferences'}
+
+${winesContext}
+
+Based on these preferences, select the 4 best wine recommendations. For each wine, provide:
+1. name: The wine name (keep exact as listed if from menu, otherwise a classic recommendation)
+2. price: The price as listed, or omit if unknown
+3. why: A single sentence (max 20 words) explaining why this suits their preferences
+
+Respond ONLY with a valid JSON array. No markdown, no explanation, just the array. Example format:
+[{"name":"Château Margaux 2018","price":"£85","why":"A full-bodied Bordeaux with ripe tannins, perfect for your preference for structure."}]`;
+
+            // Safety check — if prompt is still too large, trim the wine list further
+            let finalPrompt = prompt;
+            if (finalPrompt.length > 20000) {
+                const trimmedWines = winesForPrompt.slice(0, 40);
+                const trimmedContext = `Here are wines from the menu (trimmed to 40 for length):\n${trimmedWines.map(w => `- ${w.name}${w.vintage ? ' ' + w.vintage : ''} — ${w.price}`).join('\n')}`;
+                finalPrompt = prompt.replace(winesContext, trimmedContext);
+            }
+
+            try {
+                const raw = await apiCall([{ role: 'user', content: finalPrompt }], 1000);
+                const clean = raw.replace(/```json|```/g, '').trim();
+                state.recommendations = JSON.parse(clean);
+                state.step = 'RESULTS';
+                render();
+            } catch (err) {
+                console.error('AI error:', err);
+                state.step = 'RESULTS';
+                state.error = `Could not get recommendations: ${err.message}`;
+                render();
+            }
+        }
+
+        function buildFallback() {
+            const { type, tastes } = state.choices;
+            const typeName = type.replace(/[^\w\sé]/g, '').trim() || 'Red';
+            if (state.menuWines.length > 0) {
+                return state.menuWines.slice(0, 4).map(w => ({
+                    name: w.name,
+                    price: w.price,
+                    why: `Selected based on your ${typeName} preference.`
+                }));
+            }
+            return [
+                { name: `Reserve ${typeName}`, price: '', why: `A classic choice that matches your ${tastes[0] || 'preferred'} style.` },
+                { name: `Estate Bottled ${typeName}`, price: '', why: 'Excellent balance of quality and value.' },
+                { name: `Single Vineyard ${typeName}`, price: '', why: 'A sommelier favourite for its distinctive character.' },
+                { name: `House ${typeName}`, price: '', why: 'Reliable and well-priced — always a safe choice.' }
+            ];
+        }
+
+        function newSelectionSameList() {
+            // Keep the scanned wine list and restaurant info, reset all preference choices
+            state.choices = { type: '', countries: [], regions: [], grapes: [], _regionKeys: [], budget: '', budgetMin: undefined, budgetMax: undefined, tastes: [] };
+            state.recommendations = null;
+            state.error = null;
+            state.step = 'TYPE';
+            render();
+        }
+
+        function startOver() {
+            state = { step: 'START', menuWines: [], restaurant: { name: '', url: '', found: false }, choices: { type: '', countries: [], regions: [], grapes: [], _regionKeys: [], budget: '', budgetMin: undefined, budgetMax: undefined, tastes: [] }, recommendations: null, error: null };
+            render();
+        }
+
+        // ── Init (FIX #8: single render call) ──
+        window.onload = function () {
+            if (typeof Tesseract === 'undefined' || typeof pdfjsLib === 'undefined') {
+                app.innerHTML = `<div class="mt-20 text-center text-red-500">Error: Required libraries failed to load. Please check your internet connection.</div>`;
+                return;
+            }
+            render();
+        };
+
+        // ── PWA: Register Service Worker ──
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('Service worker registered:', reg.scope))
+                    .catch(err => console.warn('Service worker failed:', err));
+            });
+        }
+
+        // ── PWA: "Add to Home Screen" install prompt ──
+        let deferredInstallPrompt = null;
+        window.addEventListener('beforeinstallprompt', e => {
+            e.preventDefault();
+            deferredInstallPrompt = e;
+            showInstallBanner();
+        });
+
+        function showInstallBanner() {
+            if (window.matchMedia('(display-mode: standalone)').matches) return;
+            const banner = document.createElement('div');
+            banner.id = 'install-banner';
+            banner.style.cssText = `
+                position:fixed; bottom:0; left:0; right:0; z-index:100;
+                background: linear-gradient(135deg, #1c0a0a, #2c1010);
+                border-top: 1px solid rgba(180,30,30,0.3);
+                padding: 16px 20px; display:flex; align-items:center;
+                justify-content:space-between; gap:12px;
+                font-family:'Montserrat',sans-serif;
+                animation: slideUp 0.4s ease-out;
+            `;
+            banner.innerHTML = `
+                <div>
+                    <div style="font-size:13px;font-weight:600;color:white;">Add to Home Screen</div>
+                    <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px;">Works like a native app, offline-ready</div>
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button onclick="document.getElementById('install-banner').remove()"
+                        style="padding:8px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);
+                               background:transparent;color:rgba(255,255,255,0.4);font-size:12px;cursor:pointer;">
+                        Not now
+                    </button>
+                    <button onclick="installApp()"
+                        style="padding:8px 16px;border-radius:8px;background:#9b1c1c;
+                               border:none;color:white;font-size:12px;font-weight:600;cursor:pointer;">
+                        Install
+                    </button>
+                </div>`;
+            document.body.appendChild(banner);
+        }
+
+        async function installApp() {
+            if (!deferredInstallPrompt) return;
+            deferredInstallPrompt.prompt();
+            const { outcome } = await deferredInstallPrompt.userChoice;
+            deferredInstallPrompt = null;
+            const banner = document.getElementById('install-banner');
+            if (banner) banner.remove();
+        }
+
+        // ── PWA: Offline indicator ──
+        function updateOnlineStatus() {
+            const existing = document.getElementById('offline-bar');
+            if (!navigator.onLine) {
+                if (!existing) {
+                    const bar = document.createElement('div');
+                    bar.id = 'offline-bar';
+                    bar.style.cssText = `
+                        position:fixed; top:0; left:0; right:0; z-index:200;
+                        background:#292524; color:rgba(255,255,255,0.6);
+                        font-family:'Montserrat',sans-serif;
+                        font-size:11px; text-align:center; padding:6px;
+                        letter-spacing:0.05em;
+                    `;
+                    bar.textContent = '◌  Offline — scan & quiz still work, AI recommendations need a connection';
+                    document.body.prepend(bar);
+                }
+            } else {
+                if (existing) existing.remove();
+            }
+        }
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        updateOnlineStatus();
+    </script>
+</body>
+</html>
